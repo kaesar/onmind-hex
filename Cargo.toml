@@ -1,0 +1,41 @@
+[package]
+name = "hex"
+version = "0.1.0"
+edition = "2021"
+description = "Hexagonal ABCode scripting service (hex4w contract) on Rust + Feather + BoaJS via abcodelib"
+
+[features]
+# Kernel always present; adapters are opt-in like hex4w spring profiles.
+default = ["abc", "cache"]
+abc      = ["dep:reqwest"]                 # XDB /abc over HTTP
+cache    = ["dep:redis"]                   # Redis key/value (falls back to in-memory)
+store    = ["dep:aws-config", "dep:aws-sdk-s3", "dep:tokio"]      # MintStore (S3)
+events   = ["dep:aws-config", "dep:aws-sdk-sns", "dep:tokio"]     # publish → SNS
+lambda   = ["dep:aws-config", "dep:aws-sdk-lambda", "dep:tokio"]  # invoke / invokeAsync → Lambda
+email    = ["dep:lettre", "dep:tokio"]     # sendEmail → SMTP (lettre)
+graphql  = ["dep:async-graphql", "dep:futures"] # BFF GraphQL (/graphql, block_on)
+grpc     = ["dep:tonic", "dep:prost", "dep:tokio", "dep:tokio-stream", "tonic-build"] # gRPC server (XDB contract)
+
+[build-dependencies]
+tonic-build = { version = "0.12", optional = true }
+
+[dependencies]
+feather = { version = "0.8", features = ["jwt"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+abcodelib = { path = "../abcode/abcodelib" }
+
+# feature-gated infrastructure (optional)
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "blocking", "rustls-tls"] }
+redis = { version = "0.27", optional = true }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros"] }
+aws-config = { version = "=1.8.18", optional = true }
+aws-sdk-s3 = { version = "=1.137.0", optional = true }
+aws-sdk-sns = { version = "=1.104.0", optional = true }
+aws-sdk-lambda = { version = "=1.131.0", optional = true }
+lettre = { version = "0.11", optional = true, default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
+async-graphql = { version = "7", optional = true }
+futures = { version = "0.3", optional = true }
+tonic = { version = "0.12", optional = true }
+tokio-stream = { version = "0.1", optional = true }
+prost = { version = "0.13", optional = true }

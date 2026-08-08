@@ -1,0 +1,9 @@
+goal: any
+#type: Script
+
+fun: handler()
+  run: services.cacheSet("demo-key", "demo-value", 300)
+  val: cached = services.cacheGet("demo-key")
+  pass: {"cached": cached, "ok": true}
+
+run: handler()

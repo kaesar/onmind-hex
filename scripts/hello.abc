@@ -1,0 +1,8 @@
+goal: any
+#type: Script
+
+fun: handler()
+  val: cached = services.cacheGet("demo-key")
+  pass: {"hello": "from hex", "cached": cached}
+
+run: handler()

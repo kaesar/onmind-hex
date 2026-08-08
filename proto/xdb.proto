@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+// XDB /abc contract (hex4w gRPC exports). Served by `hex` and consumed by
+// frontends instead of the HTTP `/api/v1/xdb/sheet`.
+package hex4w.xdb;
+
+message SheetRequest {
+  string show = 1;
+  string from = 2;
+  string some = 3;
+}
+
+message SheetResponse {
+  bool ok = 1;
+  uint32 status = 2;
+  string message = 3;
+  uint64 total = 4;
+  string data = 5; // JSON-encoded payload, empty when absent.
+}
+
+service Xdb {
+  rpc Sheet(SheetRequest) returns (SheetResponse) {}
+}
