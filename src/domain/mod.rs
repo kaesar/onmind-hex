@@ -38,6 +38,34 @@ pub struct AbcResponse {
     pub data: Option<serde_json::Value>,
 }
 
+/// Role aggregate (hex4w `Role`/`RoleEntity`), persisted by the `db` adapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Role {
+    pub id: i64,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+/// Inbound event command `{ script, correlationId }` (hex4w `KafkaScriptCommand`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScriptCommand {
+    pub script: String,
+    #[serde(rename = "correlationId", default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+}
+
+/// Result published back to `hex4w.script.results` (hex4w `ScriptResultEnvelope`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ScriptCommandEnvelope {
+    #[serde(rename = "correlationId")]
+    pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ScriptResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Hexadecimal error variants surfaced to handlers / the composition root.
 #[derive(Debug, Clone)]
 pub enum DomainError {

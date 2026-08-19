@@ -1,12 +1,71 @@
 //! Output ports (application layer) — the seams the composition root satisfies
 //! with concrete infrastructure adapters (hex4w `application/ports/out`).
 
-use crate::domain::{AbcResponse, DomainError, StoreItem};
+use serde::{Deserialize, Serialize};
+
+use crate::domain::{AbcResponse, DomainError, Role, StoreItem};
+
+/// XDB `/abc` request (hex4w `AbcRequest` dto-in). Maps 1:1 onto the XDB ABC
+/// API payload; `where`/`sort`/`limit`/`offset` fold into `puts` over gRPC.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AbcRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub way: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub what: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub some: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub puts: Option<serde_json::Value>,
+    #[serde(rename = "where", skip_serializing_if = "Option::is_none")]
+    pub where_: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+}
+
+/// Builds an `abcExec` request with hex4w's defaults (`way=sql`, `what=!`,
+/// `from=xykit`).
+pub fn abc_exec_request(
+    what: Option<String>,
+    from: Option<String>,
+    some: Option<String>,
+    with: Option<String>,
+    puts: Option<serde_json::Value>,
+) -> AbcRequest {
+    AbcRequest {
+        way: Some("sql".into()),
+        what: Some(what.unwrap_or_else(|| "!".into())),
+        from: Some(from.unwrap_or_else(|| "xykit".into())),
+        some,
+        show: None,
+        call: None,
+        with,
+        puts,
+        where_: None,
+        sort: None,
+        limit: None,
+        offset: None,
+    }
+}
 
 /// XDB `/abc` access (the "Database" for ABCode scripts).
 pub trait AbcPort: Send + Sync {
     /// Read a sheet/collection: `sheet(show, from, some)`.
     fn sheet(&self, show: &str, from: &str, some: &str) -> Result<AbcResponse, DomainError>;
+    /// Write/execute an ABC query: `exec(req)`.
+    fn exec(&self, req: &AbcRequest) -> Result<AbcResponse, DomainError>;
 }
 
 /// Generic key/value cache for read-throughput adapters (e.g. the XDB decorator).
@@ -25,9 +84,18 @@ pub trait StorePort: Send + Sync {
     fn delete_item(&self, key: &str) -> Result<(), DomainError>;
 }
 
-/// Event fan-out (SNS/SQS/EventBridge): `services.publish(topic, payload)`.
+/// Event fan-out (SNS/SQS/EventBridge/Kafka/RabbitMQ):
+/// `services.publish(topic, key, payload)` — hex4w `EventPublisherPort`.
 pub trait EventPort: Send + Sync {
-    fn publish(&self, topic: &str, payload: &serde_json::Value) -> Result<(), DomainError>;
+    fn publish(&self, topic: &str, key: &str, payload: &str) -> Result<(), DomainError>;
+}
+
+/// Role persistence (hex4w `RoleRepositoryPort`/`R2dbcRoleRepository`).
+pub trait RoleRepositoryPort: Send + Sync {
+    fn list(&self) -> Result<Vec<Role>, DomainError>;
+    fn find(&self, id: i64) -> Result<Option<Role>, DomainError>;
+    fn search_by_name(&self, name: &str) -> Result<Vec<Role>, DomainError>;
+    fn save(&self, role: &Role) -> Result<Role, DomainError>;
 }
 
 /// FaaS invocation: `services.invoke`, `services.invokeAsync`.

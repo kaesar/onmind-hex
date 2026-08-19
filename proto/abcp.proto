@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+// XDB gRPC `AbcService` — the client-side contract hex/hex4w uses to call the
+// XDB engine (hex4w `co.onmind.grpc.proto.AbcService`). `exec` folds
+// where/sort/limit/offset into `puts` (hex4w GrpcAbcAdapter).
+package co.onmind.grpc.proto;
+
+message AbcRequest {
+  string way = 1;
+  string what = 2;
+  string from = 3;
+  string some = 4;
+  string with = 5;
+  string show = 6;
+  string call = 7;
+  string puts = 8;
+}
+
+message AbcResponse {
+  bool ok = 1;
+  string status = 2;
+  string message = 3;
+  uint64 total = 4;
+  string data_json = 5;
+}
+
+service AbcService {
+  rpc Execute(AbcRequest) returns (AbcResponse) {}
+}

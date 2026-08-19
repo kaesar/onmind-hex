@@ -136,6 +136,9 @@ fn main() {
     #[cfg(feature = "grpc")]
     hex::grpc::serve(&graph);
 
+    // Inbound script-command consumers (feature->SQS/Kafka/RabbitMQ, `cache`->Redis).
+    hex::infrastructure::consumer::start_consumers(&graph);
+
     println!("- hex - Hexagonal ABCode scripting service");
     println!("- Env: server http://localhost:{port}");
     println!("- Endpoints:");

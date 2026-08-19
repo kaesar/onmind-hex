@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::application::ports::{AbcPort, CachePort};
+use crate::application::ports::{AbcPort, AbcRequest, CachePort};
 use crate::domain::{AbcResponse, DomainError};
 use crate::infrastructure::circuit_breaker::CircuitBreaker;
 
@@ -32,6 +32,12 @@ impl AbcPort for CbAbcPort {
         let from = from.to_string();
         let some = some.to_string();
         self.cb.run(move || inner.sheet(&show, &from, &some))
+    }
+
+    fn exec(&self, req: &AbcRequest) -> Result<AbcResponse, DomainError> {
+        let inner = Arc::clone(&self.inner);
+        let req = req.clone();
+        self.cb.run(move || inner.exec(&req))
     }
 }
 
@@ -81,6 +87,9 @@ mod tests {
             _from: &str,
             _some: &str,
         ) -> Result<AbcResponse, DomainError> {
+            Err(DomainError::Internal("boom".into()))
+        }
+        fn exec(&self, _req: &AbcRequest) -> Result<AbcResponse, DomainError> {
             Err(DomainError::Internal("boom".into()))
         }
     }

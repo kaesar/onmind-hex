@@ -8,7 +8,7 @@
 use abcodelib::HostService;
 use std::sync::Arc;
 
-use crate::application::ports::{AbcPort, CachePort, EmailPort, EventPort, LambdaPort, StorePort};
+use crate::application::ports::{abc_exec_request, AbcPort, CachePort, EmailPort, EventPort, LambdaPort, StorePort};
 
 pub struct FacadeBuilder {
     abc: Option<Arc<dyn AbcPort>>,
@@ -76,9 +76,16 @@ impl FacadeBuilder {
                 }
             }));
             services.push(arc_fn("abcExec", {
-                let _abc = Arc::clone(&abc);
-                move |_args| {
-                    Err("abcExec: not implemented in this build (XDB write)".to_string())
+                let abc = Arc::clone(&abc);
+                move |args| {
+                    let what = args.get(0).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let from = args.get(1).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let some = args.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let with = args.get(3).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let puts = args.get(4).cloned().filter(|v| !v.is_null());
+                    let req = abc_exec_request(what, from, some, with, puts);
+                    let resp = abc.exec(&req).map_err(|e| e.to_string())?;
+                    serde_json::to_value(resp).map_err(|e| e.to_string())
                 }
             }));
         } else {
@@ -159,13 +166,18 @@ impl FacadeBuilder {
             }));
         }
 
-        // Events (SNS): publish(topic, payload)
+        // Events (SNS/SQS/EventBridge/Kafka/RabbitMQ): publish(topic, key, payload)
         if let Some(events) = &self.events {
             let events = Arc::clone(events);
             services.push(arc_fn("publish", move |args| {
                 let topic = str_arg(args, 0).to_string();
-                let payload = json_arg(args, 1).unwrap_or(serde_json::Value::Null);
-                events.publish(&topic, &payload).map_err(|e| e.to_string())?;
+                let key = args.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let payload = match args.get(2) {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(v) => serde_json::to_string(v).map_err(|e| e.to_string())?,
+                    None => String::new(),
+                };
+                events.publish(&topic, &key, &payload).map_err(|e| e.to_string())?;
                 Ok(serde_json::json!(true))
             }));
         }

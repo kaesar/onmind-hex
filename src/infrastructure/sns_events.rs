@@ -1,11 +1,13 @@
 //! Events → SNS publisher adapter (feature `events`).
 //!
-//! `services.publish(topic, payload)` fans out a JSON message to an SNS topic
-//! ARN. Real AWS SDK; shares the Tokio runtime with the other cloud adapters.
+//! `services.publish(topic, key, payload)` fans out a JSON message to an SNS
+//! topic ARN, carrying `key` as a `key` message attribute. Real AWS SDK; shares
+//! the Tokio runtime with the other cloud adapters.
 
 use std::sync::Arc;
 
 use aws_config::BehaviorVersion;
+use aws_sdk_sns::types::MessageAttributeValue;
 
 use crate::domain::DomainError;
 
@@ -25,17 +27,22 @@ impl SnsEventPublisher {
 }
 
 impl crate::application::ports::EventPort for SnsEventPublisher {
-    fn publish(&self, topic: &str, payload: &serde_json::Value) -> Result<(), DomainError> {
-        let message = serde_json::to_string(payload)
-            .map_err(|e| DomainError::Internal(format!("publish serialize: {e}")))?;
+    fn publish(&self, topic: &str, key: &str, payload: &str) -> Result<(), DomainError> {
+        let mut req = self
+            .client
+            .publish()
+            .topic_arn(topic)
+            .message(payload.to_string());
+        if !key.is_empty() {
+            let attr = MessageAttributeValue::builder()
+                .data_type("String")
+                .string_value(key)
+                .build()
+                .expect("valid message attribute");
+            req = req.message_attributes("key", attr);
+        }
         self.rt
-            .block_on(
-                self.client
-                    .publish()
-                    .topic_arn(topic)
-                    .message(message)
-                    .send(),
-            )
+            .block_on(req.send())
             .map(|_| ())
             .map_err(|e| DomainError::Internal(format!("sns publish {topic}: {e}")))
     }

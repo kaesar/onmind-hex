@@ -7,4 +7,4 @@ pub mod use_cases;
 
 pub use facade::FacadeBuilder;
 pub use script_whitelist::ScriptWhitelist;
-pub use use_cases::ScriptingUseCase;
+pub use use_cases::{ScriptCommandUseCase, ScriptingUseCase};
