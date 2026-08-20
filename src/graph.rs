@@ -10,7 +10,7 @@ use crate::application::ports::{
 use crate::application::{FacadeBuilder, ScriptCommandUseCase, ScriptWhitelist, ScriptingUseCase};
 #[cfg(feature = "lambda")]
 use crate::application::ports::LambdaPort;
-use crate::domain::{AbcResponse, DomainError, StoreItem};
+use crate::domain::{AbcResponse, DomainError, Role, StoreItem};
 use crate::infrastructure::circuit_breaker::{CbConfig, CircuitBreaker};
 #[cfg(feature = "abc")]
 use crate::infrastructure::cb_decorator::CbAbcPort;
@@ -214,8 +214,20 @@ impl Graph {
 
     /// `services.sendEmail`/`POST /api/v1/notifications/email` (feature `email`).
     pub fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<(), DomainError> {
+        self.send_email_full(to, subject, body, None, &[])
+    }
+
+    /// hex4w `EmailPort.send(to, subject, body, from, cc)` via the HTTP route.
+    pub fn send_email_full(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+        from: Option<&str>,
+        cc: &[String],
+    ) -> Result<(), DomainError> {
         match &self.email {
-            Some(e) => e.send_email(to, subject, body),
+            Some(e) => e.send_email_full(to, subject, body, from, cc),
             None => Err(DomainError::Internal("email adapter not enabled (feature 'email')".into())),
         }
     }
@@ -223,6 +235,42 @@ impl Graph {
     /// Role repository (feature `db`).
     pub fn roles(&self) -> Option<&Arc<dyn RoleRepositoryPort>> {
         self.roles.as_ref()
+    }
+
+    /// hex4w `RoleUseCase.createRole` (validates, checks duplicates, persists).
+    pub fn create_role(&self, name: &str) -> Result<Role, DomainError> {
+        let repo = self
+            .roles()
+            .ok_or_else(|| DomainError::Internal("roles adapter not enabled (feature 'db')".into()))?;
+        let name = crate::domain::validate_role_name(name)?;
+        if repo.exists_by_name(&name)? {
+            return Err(DomainError::Duplicate(name));
+        }
+        repo.save(&Role { id: 0, name, created_at: None })
+    }
+
+    /// hex4w `RoleUseCase.getAllRoles` (JSON array).
+    pub fn list_roles(&self) -> Result<Vec<Role>, DomainError> {
+        self.roles()
+            .ok_or_else(|| DomainError::Internal("roles adapter not enabled (feature 'db')".into()))?
+            .list()
+    }
+
+    /// hex4w `RoleUseCase.getRolesByNamePattern` (case-insensitive substring).
+    pub fn search_roles(&self, name: &str) -> Result<Vec<Role>, DomainError> {
+        if name.trim().is_empty() {
+            return Err(DomainError::InvalidRequest("Name pattern cannot be null or empty".into()));
+        }
+        self.roles()
+            .ok_or_else(|| DomainError::Internal("roles adapter not enabled (feature 'db')".into()))?
+            .search_by_name(name.trim())
+    }
+
+    /// hex4w `RoleUseCase.getRoleById` (`None` → bare 404).
+    pub fn get_role(&self, id: i64) -> Result<Option<Role>, DomainError> {
+        self.roles()
+            .ok_or_else(|| DomainError::Internal("roles adapter not enabled (feature 'db')".into()))?
+            .find(id)
     }
 
     /// Script-command consumer use case (only when an event publisher is wired).

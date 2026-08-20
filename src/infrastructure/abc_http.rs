@@ -78,6 +78,13 @@ impl XdbHttpAdapter {
 
 impl AbcPort for XdbHttpAdapter {
     fn sheet(&self, show: &str, from: &str, some: &str) -> Result<AbcResponse, DomainError> {
+        let from = if from.is_empty() { "xykit" } else { from };
+        let some = if some.is_empty() { "sheet" } else { some };
+        let show = if show.is_empty() {
+            "kit01 sheetid, kit02 name, kit03 title, kit05 model"
+        } else {
+            show
+        };
         self.post_json(&serde_json::json!({
             "what": "find",
             "from": from,

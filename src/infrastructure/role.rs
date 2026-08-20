@@ -88,20 +88,47 @@ impl RoleRepositoryPort for SqliteRoleRepository {
 
     fn save(&self, role: &Role) -> Result<Role, DomainError> {
         let conn = self.conn.lock().unwrap();
-        let id = if role.id == 0 {
+        if role.id == 0 {
             conn.execute("INSERT INTO roles (name) VALUES (?1)", params![role.name])
                 .map_err(|e| err(e))?;
-            conn.last_insert_rowid()
+            let id = conn.last_insert_rowid();
+            conn.query_row(
+                "SELECT id, name, created_at FROM roles WHERE id = ?1",
+                params![id],
+                Self::row_to_role,
+            )
+            .map_err(|e| err(e))
         } else {
             conn.execute("UPDATE roles SET name = ?1 WHERE id = ?2", params![role.name, role.id])
                 .map_err(|e| err(e))?;
-            role.id
-        };
-        Ok(Role {
-            id,
-            name: role.name.clone(),
-            created_at: None,
-        })
+            conn.query_row(
+                "SELECT id, name, created_at FROM roles WHERE id = ?1",
+                params![role.id],
+                Self::row_to_role,
+            )
+            .map_err(|e| err(e))
+        }
+    }
+
+    fn exists_by_name(&self, name: &str) -> Result<bool, DomainError> {
+        let conn = self.conn.lock().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM roles WHERE name = ?1", params![name], |r| r.get(0))
+            .map_err(|e| err(e))?;
+        Ok(n > 0)
+    }
+
+    fn count(&self) -> Result<i64, DomainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM roles", [], |r| r.get(0))
+            .map_err(|e| err(e))
+    }
+
+    fn delete_by_id(&self, id: i64) -> Result<(), DomainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM roles WHERE id = ?1", params![id])
+            .map(|_| ())
+            .map_err(|e| err(e))
     }
 }
 

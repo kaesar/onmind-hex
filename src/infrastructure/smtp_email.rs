@@ -61,12 +61,29 @@ impl SmtpEmailSender {
 }
 
 impl crate::application::ports::EmailPort for SmtpEmailSender {
-    fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<(), DomainError> {
-        let mail = Message::builder()
-            .from(self.from.clone())
+    fn send_email_full(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+        from: Option<&str>,
+        cc: &[String],
+    ) -> Result<(), DomainError> {
+        let mut builder = Message::builder()
+            .from(
+                from
+                    .filter(|f| !f.is_empty())
+                    .map(mailbox)
+                    .transpose()?
+                    .unwrap_or_else(|| self.from.clone()),
+            )
             .to(mailbox(to)?)
             .subject(subject.to_string())
-            .header(ContentType::TEXT_HTML)
+            .header(ContentType::TEXT_HTML);
+        for c in cc {
+            builder = builder.cc(mailbox(c)?);
+        }
+        let mail = builder
             .body(html_body(body))
             .map_err(|e| DomainError::Internal(format!("smtp message: {e}")))?;
         self.transport

@@ -96,6 +96,9 @@ pub trait RoleRepositoryPort: Send + Sync {
     fn find(&self, id: i64) -> Result<Option<Role>, DomainError>;
     fn search_by_name(&self, name: &str) -> Result<Vec<Role>, DomainError>;
     fn save(&self, role: &Role) -> Result<Role, DomainError>;
+    fn exists_by_name(&self, name: &str) -> Result<bool, DomainError>;
+    fn count(&self) -> Result<i64, DomainError>;
+    fn delete_by_id(&self, id: i64) -> Result<(), DomainError>;
 }
 
 /// FaaS invocation: `services.invoke`, `services.invokeAsync`.
@@ -108,7 +111,18 @@ pub trait LambdaPort: Send + Sync {
     fn invoke_async(&self, name: &str, payload: &serde_json::Value) -> Result<(), DomainError>;
 }
 
-/// Outbound email: `services.sendEmail(to, subject, body)`.
+/// Outbound email: `services.sendEmail(to, subject, body)` (hex4w `EmailPort`).
 pub trait EmailPort: Send + Sync {
-    fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<(), DomainError>;
+    fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<(), DomainError> {
+        self.send_email_full(to, subject, body, None, &[])
+    }
+    /// hex4w `EmailPort.send(to, subject, body, from, cc)`.
+    fn send_email_full(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+        from: Option<&str>,
+        cc: &[String],
+    ) -> Result<(), DomainError>;
 }

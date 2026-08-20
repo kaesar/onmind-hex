@@ -1,16 +1,16 @@
-//! GraphQL BFF (feature `graphql`).
+//! GraphQL gateway over the XDB `/abc` protocol (feature `graphql`).
 //!
-//! Synchronous GraphQL layer over the scripting use case and the XDB sheet
-//! read. Executed via `Schema::execute_sync` inside Feather's HTTP handler —
-//! resolvers stay synchronous, no extra async runtime.
+//! Mirrors hex4w `AbcGraphqlResolver`/`AbcSheetTrait`: the only queries are
+//! `abcSheet(show, from, some)` and `abcSheets(requests)` against the XDB
+//! `/abc` endpoint (via `AbcPort.sheet`). Feather is fully synchronous, so the
+//! resolvers run with `block_on` — no extra async runtime. `defaults` for the
+//! XDB payload (show columns / from / some) live in the `AbcPort` adapters,
+//! matching hex4w `AbcWebClient.sheet`.
 
-use async_graphql::Context;
-use async_graphql::{
-    EmptyMutation, EmptySubscription, Json, Object, Result, Schema, SimpleObject,
-};
+use async_graphql::{Context, EmptyMutation, EmptySubscription, InputObject, Json, Object, Result, Schema, SimpleObject};
 use std::sync::Arc;
 
-use crate::domain::{AbcResponse, ScriptResult};
+use crate::domain::AbcResponse;
 use crate::graph::Graph;
 
 /// Per-request state provided to the resolvers.
@@ -18,22 +18,9 @@ pub struct AppState {
     pub graph: Arc<Graph>,
 }
 
+/// XDB `/abc` `find` response (hex4w `SheetResponseDto`).
 #[derive(SimpleObject)]
-pub struct HealthView {
-    status: &'static str,
-    service: &'static str,
-    version: &'static str,
-}
-
-#[derive(SimpleObject)]
-pub struct ScriptView {
-    pub value: Json<serde_json::Value>,
-    pub stdout: String,
-    pub stderr: Option<String>,
-}
-
-#[derive(SimpleObject)]
-pub struct SheetView {
+pub struct SheetResponse {
     pub ok: bool,
     pub status: u16,
     pub message: String,
@@ -41,57 +28,67 @@ pub struct SheetView {
     pub data: Option<Json<serde_json::Value>>,
 }
 
+/// One sheet query input (hex4w `AbcSheetInput`).
+#[derive(InputObject)]
+pub struct AbcSheetInput {
+    pub show: String,
+    pub from: String,
+    pub some: String,
+}
+
+impl AbcSheetInput {
+    fn to_args(&self) -> (&str, &str, &str) {
+        (&self.show, &self.from, &self.some)
+    }
+}
+
 #[derive(Default)]
 pub struct QueryRoot;
 
 #[Object]
 impl QueryRoot {
-    async fn health(&self) -> HealthView {
-        HealthView {
-            status: "healthy",
-            service: "hex",
-            version: "0.1.0",
-        }
-    }
-
-    async fn execute(&self, ctx: &Context<'_>, script: String) -> Result<ScriptView> {
-        let state = ctx.data::<AppState>()?;
-        let result: ScriptResult = state.graph.scripting.execute(&script)?;
-        Ok(ScriptView {
-            value: Json(result.value.unwrap_or(serde_json::Value::Null)),
-            stdout: result.stdout,
-            stderr: result.stderr,
-        })
-    }
-
-    async fn sheet(
+    /// One XDB `/abc` sheet read (hex4w `abcSheet`).
+    async fn abc_sheet(
         &self,
         ctx: &Context<'_>,
         show: String,
-        from: Option<String>,
-        some: Option<String>,
-    ) -> Result<SheetView> {
+        from: String,
+        some: String,
+    ) -> Result<SheetResponse> {
         let state = ctx.data::<AppState>()?;
-        let from = from.unwrap_or_else(|| "xykit".to_string());
-        let some = some.unwrap_or_else(|| "sheet".to_string());
         let resp: AbcResponse = state.graph.abc_sheet(&show, &from, &some)?;
-        Ok(SheetView {
-            ok: resp.ok,
-            status: resp.status,
-            message: resp.message,
-            total: resp.total.map(|t| t as i64),
-            data: resp.data.map(Json),
-        })
+        Ok(map_sheet(resp))
+    }
+
+    /// Batch XDB `/abc` sheet reads, one call per request (hex4w `abcSheets`).
+    async fn abc_sheets(
+        &self,
+        ctx: &Context<'_>,
+        requests: Vec<AbcSheetInput>,
+    ) -> Result<Vec<SheetResponse>> {
+        let state = ctx.data::<AppState>()?;
+        let mut out = Vec::with_capacity(requests.len());
+        for r in requests {
+            let (show, from, some) = r.to_args();
+            let resp: AbcResponse = state.graph.abc_sheet(show, from, some)?;
+            out.push(map_sheet(resp));
+        }
+        Ok(out)
+    }
+}
+
+fn map_sheet(r: AbcResponse) -> SheetResponse {
+    SheetResponse {
+        ok: r.ok,
+        status: r.status,
+        message: r.message,
+        total: r.total.map(|t| t as i64),
+        data: r.data.map(Json),
     }
 }
 
 pub type AppSchema = Schema<QueryRoot, EmptyMutation, EmptySubscription>;
 
 pub fn build_schema() -> AppSchema {
-    Schema::build(
-        QueryRoot,
-        EmptyMutation,
-        EmptySubscription,
-    )
-    .finish()
+    Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish()
 }

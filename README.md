@@ -8,9 +8,17 @@ App-template with **hexagonal architecture** in **Rust + Feather + BoaJS (abcode
 |--------|------|-------------|
 | `POST` | `/api/v1/script/execute` | Executes a whitelisted `*.abc` script → `{ value, stdout, stderr }` |
 | `GET`  | `/api/v1/xdb/sheet?show=&from=&some=` | Lists XDB sheets (`/abc`) |
+| `GET`  | `/api/v1/roles?byage-desc` | Lists roles (`Role` shape) |
+| `POST` | `/api/v1/roles` | Creates a role (`{name}` → `Role`) |
+| `GET`  | `/api/v1/roles/:id` | Gets a role by numeric id |
+| `GET`  | `/api/v1/roles/search?name=` | Searches roles by display name |
+| `GET`  | `/api/v1/store/items?bucket=` | Lists store items (`listItems`) |
+| `POST` | `/api/v1/notifications/email` | Sends email (`sendEmail`) |
+| `GET`  | `/api/v1/health` | Health check → `{status, message}` |
+| `GET`  | `/api/v1/info` | Service info → `{name, version, description, basePath}` |
 | `GET`  | `/health` | Health check (public even in JWT mode) |
 
-Security: **script name whitelist** + path-traversal rejection (the only required control). JWT/Auth-NoAuth via `JWT_SECRET` (same as abcodefun).
+Security: **script name whitelist** + path-traversal rejection (the only required control). JWT/Auth-NoAuth via `JWT_SECRET` (same as abcodefun). `/health`, `/api/v1/health` and `/api/v1/info` stay public even in JWT mode.
 
 ## Architecture
 
@@ -45,8 +53,9 @@ run: handler()
 | `HEX_XDB_BASE_URL` | `http://localhost:9990` | feature `abc` |
 | `PORT` | `3001` | HTTP port |
 | `JWT_SECRET` | (empty) | enables JWT if set |
+| `EMAIL_ENABLED` | `false` | sendEmail returns `Unsupported` if not `true` |
 
-## Rust Features (serial style hex4x profile)
+## Rust Features (serial style hex4x: like hex4w and hex4k)
 
 | Feature | Adapter | Requires* |
 |---------|---------|-----------|
@@ -81,7 +90,7 @@ Runs in its own Tokio runtime (background thread). `proto/xdb.proto` → package
 
 ### GraphQL (feature `graphql`)
 
-POST /graphql with body `{"query","variables","operation_name"}`. Fields: `health`, `execute(script)`, `sheet(show,from,some)`.
+POST /graphql with body `{"query","variables","operation_name"}`. Gateways the XDB `/abc` protocol (hex4w `AbcGraphqlResolver`): `abcSheet(show, from, some)` and `abcSheets(requests: [{show, from, some}])`, both returning `{ ok, status, message, total, data }`.
 
 `services.*` exposed to scripts (hex4w `ScriptServicesFacade`):
 
@@ -99,5 +108,7 @@ cargo clippy --all-targets
 ```
 
 > MSRV: 1.94. The `aws-*` versions are pinned to Rust line 1.91.1 (compatible with 1.94.0) via `Cargo.lock`; no toolchain bump is applied.
+
+---
 
 © 2025 by César Andres Arcila Buitrago

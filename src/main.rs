@@ -67,11 +67,150 @@ fn main() {
     {
         let graph = Arc::clone(&graph);
         app.get("/api/v1/xdb/sheet", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
-            let show = req.param("show").unwrap_or("");
-            let from = req.param("from").unwrap_or("xykit");
-            let some = req.param("some").unwrap_or("sheet");
-            match graph.abc_sheet(show, from, some) {
+            let q = req.query().unwrap_or_default();
+            let mut show = q.get("show").cloned().unwrap_or_default();
+            let mut from = q.get("from").cloned().unwrap_or_else(|| "xykit".into());
+            let mut some = q.get("some").cloned().unwrap_or_else(|| "sheet".into());
+            if show.is_empty() { show = "browser".into(); }
+            if from.is_empty() { from = "xykit".into(); }
+            if some.is_empty() { some = "sheet".into(); }
+            match graph.abc_sheet(&show, &from, &some) {
                 Ok(r) => json_body(res, 200, &r),
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+    }
+
+    // Roles (feature `db`): hex4w `RoleHandler` — POST create, GET all/search/{id}
+    #[cfg(feature = "db")]
+    {
+        #[derive(Deserialize)]
+        struct CreateRoleRequest {
+            name: String,
+        }
+
+        let g = Arc::clone(&graph);
+        app.post("/api/v1/roles", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            let body = std::str::from_utf8(&req.body).unwrap_or("");
+            let request: CreateRoleRequest = match serde_json::from_str(body) {
+                Ok(r) => r,
+                Err(e) => {
+                    json_error(res, 400, "INVALID_REQUEST", &format!("{e}"));
+                    return Ok(MiddlewareResult::Next);
+                }
+            };
+            match g.create_role(&request.name) {
+                Ok(role) => json_body(res, 201, &role),
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+
+        let g = Arc::clone(&graph);
+        app.get("/api/v1/roles/search", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            let name = req.query().unwrap_or_default().get("name").cloned().unwrap_or_default();
+            match g.search_roles(&name) {
+                Ok(roles) => json_body(res, 200, &roles),
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+
+        let g = Arc::clone(&graph);
+        app.get("/api/v1/roles", move |_req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            match g.list_roles() {
+                Ok(roles) => json_body(res, 200, &roles),
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+
+        let g = Arc::clone(&graph);
+        app.get("/api/v1/roles/:id", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            let id: i64 = match req.param("id").unwrap_or("").trim().parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    json_error(res, 400, "INVALID_REQUEST", "Role ID must be a positive number");
+                    return Ok(MiddlewareResult::Next);
+                }
+            };
+            match g.get_role(id) {
+                Ok(Some(role)) => json_body(res, 200, &role),
+                Ok(None) => {
+                    res.set_status(404);
+                    return Ok(MiddlewareResult::Next);
+                }
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+    }
+
+    // GET /api/v1/store/items?bucket= (feature `store`): hex4w `StoreHandler`.
+    #[cfg(feature = "store")]
+    {
+        let g = Arc::clone(&graph);
+        app.get("/api/v1/store/items", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            let bucket = req.query().unwrap_or_default().get("bucket").cloned().unwrap_or_default();
+            if bucket.is_empty() {
+                json_error(res, 400, "INVALID_REQUEST", "Bucket name is required");
+                return Ok(MiddlewareResult::Next);
+            }
+            match g.list_items(bucket) {
+                Ok(items) => json_body(res, 200, &items),
+                Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
+            }
+            Ok(MiddlewareResult::Next)
+        });
+    }
+
+    // POST /api/v1/notifications/email (feature `email`): hex4w `EmailHandler`.
+    #[cfg(feature = "email")]
+    {
+        #[derive(Deserialize)]
+        struct SendEmailRequest {
+            to: String,
+            subject: String,
+            #[serde(default)]
+            from: Option<String>,
+            #[serde(default)]
+            cc: Vec<String>,
+            body: String,
+        }
+
+        let g = Arc::clone(&graph);
+        app.post("/api/v1/notifications/email", move |req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+            let body = std::str::from_utf8(&req.body).unwrap_or("");
+            let request: SendEmailRequest = match serde_json::from_str(body) {
+                Ok(r) => r,
+                Err(e) => {
+                    json_error(res, 400, "INVALID_REQUEST", &format!("{e}"));
+                    return Ok(MiddlewareResult::Next);
+                }
+            };
+            let mut problems = Vec::new();
+            if request.to.is_empty() {
+                problems.push("to is required");
+            }
+            if request.subject.is_empty() {
+                problems.push("subject is required");
+            }
+            if request.body.is_empty() {
+                problems.push("body is required");
+            }
+            if !problems.is_empty() {
+                json_error(res, 400, "INVALID_REQUEST", &problems.join(", "));
+                return Ok(MiddlewareResult::Next);
+            }
+            match g.send_email_full(
+                &request.to,
+                &request.subject,
+                &request.body,
+                request.from.as_deref(),
+                &request.cc,
+            ) {
+                Ok(()) => json_body(res, 200, &serde_json::json!({ "message": "Email queued successfully" })),
                 Err(e) => json_error(res, domain_status(&e), error_code(&e), &e.to_string()),
             }
             Ok(MiddlewareResult::Next)
@@ -119,6 +258,27 @@ fn main() {
         println!("   POST /graphql (GraphQL BFF)");
     }
 
+    // GET /api/v1/health (hex4w `utilityRoutes` parity) — shape {status, message}
+    app.get("/api/v1/health", move |_req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+        json_body(res, 200, &serde_json::json!({ "status": "UP", "message": "hex is running" }));
+        Ok(MiddlewareResult::Next)
+    });
+
+    // GET /api/v1/info (hex4w parity) — {name, version, description, basePath}
+    app.get("/api/v1/info", move |_req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
+        json_body(
+            res,
+            200,
+            &serde_json::json!({
+                "name": "hex",
+                "version": VERSION,
+                "description": "Hexagonal ABCode scripting service (hex4w contract) on Rust + Feather + BoaJS",
+                "basePath": "/api/v1"
+            }),
+        );
+        Ok(MiddlewareResult::Next)
+    });
+
     // GET /health
     app.get("/health", move |_req: &mut Request, res: &mut Response, _: &AppContext| -> Result<MiddlewareResult, Box<dyn Error>> {
         let h = HealthResponse {
@@ -154,6 +314,7 @@ fn error_code(e: &hex::domain::DomainError) -> &'static str {
         hex::domain::DomainError::ScriptNotAllowed(_) => "SCRIPT_NOT_ALLOWED",
         hex::domain::DomainError::ScriptNotFound(_) => "SCRIPT_NOT_FOUND",
         hex::domain::DomainError::InvalidRequest(_) => "INVALID_REQUEST",
+        hex::domain::DomainError::Duplicate(_) => "DUPLICATE_ROLE",
         hex::domain::DomainError::Unavailable(_) => "SERVICE_UNAVAILABLE",
         hex::domain::DomainError::Internal(_) => "INTERNAL_ERROR",
     }
@@ -212,8 +373,8 @@ fn auth_middleware(
             return Ok(MiddlewareResult::Next);
         };
 
-        // Health is always public (matches abcodefun).
-        if req.path() == "/health" {
+        // Health/info are always public (matches abcodefun + hex4w utility routes).
+        if matches!(req.path().as_ref(), "/health" | "/api/v1/health" | "/api/v1/info") {
             return Ok(MiddlewareResult::Next);
         }
 

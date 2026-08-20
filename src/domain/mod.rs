@@ -20,9 +20,9 @@ pub struct StoreItem {
     pub key: String,
     #[serde(default)]
     pub size: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "lastModified", default, skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "eTag", default, skip_serializing_if = "Option::is_none")]
     pub e_tag: Option<String>,
 }
 
@@ -43,7 +43,7 @@ pub struct AbcResponse {
 pub struct Role {
     pub id: i64,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "createdAt", default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
 }
 
@@ -75,6 +75,8 @@ pub enum DomainError {
     ScriptNotFound(String),
     /// Malformed request.
     InvalidRequest(String),
+    /// Role name already exists (hex4w `DuplicateRoleException`, HTTP 409).
+    Duplicate(String),
     /// Downstream dependency rejected by the circuit breaker (HTTP 503).
     Unavailable(String),
     /// Any other failure (compile, exec, infra).
@@ -87,6 +89,7 @@ impl std::fmt::Display for DomainError {
             Self::ScriptNotAllowed(m) => write!(f, "SCRIPT_NOT_ALLOWED: {m}"),
             Self::ScriptNotFound(m) => write!(f, "SCRIPT_NOT_FOUND: {m}"),
             Self::InvalidRequest(m) => write!(f, "INVALID_REQUEST: {m}"),
+            Self::Duplicate(m) => write!(f, "DUPLICATE_ROLE: {m}"),
             Self::Unavailable(m) => write!(f, "SERVICE_UNAVAILABLE: {m}"),
             Self::Internal(m) => write!(f, "INTERNAL_ERROR: {m}"),
         }
@@ -100,7 +103,82 @@ pub fn domain_status(err: &DomainError) -> u16 {
         DomainError::ScriptNotAllowed(_) => 403,
         DomainError::ScriptNotFound(_) => 404,
         DomainError::InvalidRequest(_) => 400,
+        DomainError::Duplicate(_) => 409,
         DomainError::Unavailable(_) => 503,
         DomainError::Internal(_) => 500,
+    }
+}
+
+/// hex4w `RoleService` name validation: trimmed, 2..=50 chars, charset
+/// `[a-zA-Z0-9_ -]`, reserved names and system prefixes rejected.
+pub fn validate_role_name(name: &str) -> Result<String, DomainError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(DomainError::InvalidRequest("Role name cannot be null or empty".into()));
+    }
+    if trimmed.len() < 2 {
+        return Err(DomainError::InvalidRequest("Role name must be at least 2 characters long".into()));
+    }
+    if trimmed.len() > 50 {
+        return Err(DomainError::InvalidRequest("Role name cannot exceed 50 characters".into()));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ' || c == '-' || c == '\t')
+    {
+        return Err(DomainError::InvalidRequest(
+            "Role name can only contain letters, numbers, spaces, hyphens and underscores".into(),
+        ));
+    }
+    let upper = trimmed.to_uppercase();
+    for reserved in ["SYSTEM", "ROOT", "NULL", "UNDEFINED"] {
+        if upper.contains(reserved) {
+            return Err(DomainError::InvalidRequest(
+                format!("Role name '{trimmed}' is reserved and cannot be used"),
+            ));
+        }
+    }
+    if upper.starts_with("SYS_") || upper.starts_with("INTERNAL_") {
+        return Err(DomainError::InvalidRequest(
+            "Role name cannot start with system prefixes (SYS_, INTERNAL_)".into(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn role_name_rules() {
+        assert_eq!(validate_role_name("  admin  ").unwrap(), "admin");
+        assert!(validate_role_name("a").is_err());
+        assert_eq!(validate_role_name(&"x".repeat(51)).unwrap_err().to_string(), "INVALID_REQUEST: Role name cannot exceed 50 characters");
+        assert!(validate_role_name("va l!d?").is_err());
+        assert!(validate_role_name("SYSTEM X").is_err());
+        assert!(validate_role_name("SYS_PRE").is_err());
+        assert!(validate_role_name("INTERNAL__x").is_err());
+        assert!(validate_role_name("fine-role_2").is_ok());
+    }
+
+    #[test]
+    fn duplicate_maps_to_409() {
+        assert_eq!(domain_status(&DomainError::Duplicate("ADMIN".into())), 409);
+        assert_eq!(domain_status(&DomainError::InvalidRequest("x".into())), 400);
+    }
+
+    #[test]
+    fn store_and_role_json_use_hex4w_field_names() {
+        let item = StoreItem { key: "k".into(), size: 1, last_modified: Some("t".into()), e_tag: Some("e".into()) };
+        let v: serde_json::Value = serde_json::to_value(item).unwrap();
+        assert_eq!(v["lastModified"], "t");
+        assert_eq!(v["eTag"], "e");
+        assert!(v.get("last_modified").is_none());
+
+        let role = Role { id: 1, name: "x".into(), created_at: Some("now".into()) };
+        let v: serde_json::Value = serde_json::to_value(role).unwrap();
+        assert_eq!(v["createdAt"], "now");
+        assert!(v.get("created_at").is_none());
     }
 }
