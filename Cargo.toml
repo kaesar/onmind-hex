@@ -28,7 +28,7 @@ tonic-build = { version = "0.12", optional = true }
 feather = { version = "0.8", features = ["jwt"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-abcodelib = { path = "../abcode/abcodelib" }
+abcodelib = { path = "../../../abcode/abcodelib" }
 
 # feature-gated infrastructure (optional)
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "blocking", "rustls-tls"] }
